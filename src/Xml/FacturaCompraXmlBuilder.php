@@ -6,6 +6,7 @@ namespace Stea\FacturaElectronica\Xml;
 
 use DOMDocument;
 use DOMElement;
+use Stea\FacturaElectronica\Cabys;
 use Stea\FacturaElectronica\Dtos\EmisorDto;
 use Stea\FacturaElectronica\Dtos\FacturaCompraDto;
 use Stea\FacturaElectronica\Dtos\InformacionReferenciaDto;
@@ -154,9 +155,10 @@ final class FacturaCompraXmlBuilder implements DocumentBuilder
         $this->el($doc, $moneda, 'CodigoMoneda', $dto->moneda);
         $this->el($doc, $moneda, 'TipoCambio', $this->money($dto->tipoCambio));
 
+        $totalServGravados = 0.0;
         $totalServExentos = 0.0;
-        $totalGravado = 0.0;
-        $totalExento = 0.0;
+        $totalMercanciasGravadas = 0.0;
+        $totalMercanciasExentas = 0.0;
         $totalVenta = 0.0;
         $totalImpuesto = 0.0;
 
@@ -176,15 +178,33 @@ final class FacturaCompraXmlBuilder implements DocumentBuilder
                 $desglose[$key]['monto'] += $impuesto->monto;
             }
 
+            // CABYS decides whether the line is goods or a service; Hacienda
+            // wants the gravado/exento split reported per category.
+            $esMercancia = Cabys::esMercancia($linea->codigoCabys);
+
             if ($impuestoLinea > 0.0) {
-                $totalGravado += $linea->subTotal;
+                if ($esMercancia) {
+                    $totalMercanciasGravadas += $linea->subTotal;
+                } else {
+                    $totalServGravados += $linea->subTotal;
+                }
             } else {
-                $totalExento += $linea->subTotal;
-                $totalServExentos += $linea->subTotal;
+                if ($esMercancia) {
+                    $totalMercanciasExentas += $linea->subTotal;
+                } else {
+                    $totalServExentos += $linea->subTotal;
+                }
             }
         }
 
+        $totalGravado = $totalServGravados + $totalMercanciasGravadas;
+        $totalExento = $totalServExentos + $totalMercanciasExentas;
+
+        // Order matters: the XSD declares ResumenFactura as a sequence.
+        $this->el($doc, $node, 'TotalServGravados', $this->money($totalServGravados));
         $this->el($doc, $node, 'TotalServExentos', $this->money($totalServExentos));
+        $this->el($doc, $node, 'TotalMercanciasGravadas', $this->money($totalMercanciasGravadas));
+        $this->el($doc, $node, 'TotalMercanciasExentas', $this->money($totalMercanciasExentas));
         $this->el($doc, $node, 'TotalGravado', $this->money($totalGravado));
         $this->el($doc, $node, 'TotalExento', $this->money($totalExento));
         $this->el($doc, $node, 'TotalExonerado', $this->money(0.0));
